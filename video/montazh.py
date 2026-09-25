@@ -1,7 +1,8 @@
 """Вертикальный ролик 9:16 с презентации волонтёрского клуба.
 
 Склейки стоят в сетке 124 BPM, дроп музыки — 3.87 с (начало 3-го такта).
-Переходы — только из video/perehody.py: zoom in, zoom out, spin, flash, punch.
+Переходы — из video/perehody.py (zoom in, zoom out, flash), без тряски.
+Финал — все машут в камеру, надпись «Волонтёрский клуб» и уход в чёрный.
 
 Запуск: python montazh.py <папка с IMG_*.mov> <выход.mp4>
 """
@@ -30,44 +31,120 @@ TRF = 10  # длина перехода в кадрах (~1/3 с), по цент
 # (исходник, старт в сек, длина в битах, зум-кроп, центр x, центр y, переход В этот кусок)
 EDIT = [
     # --- часть 1: презентация, зал смотрит и слушает ---
-    ("IMG_4546", 4.00, 5, 1.0, .5, .5, None),         # спикеры у экрана, начало презентации
-    ("IMG_4548", 0.00, 3, 1.0, .5, .5, None),         # зрители слушают
-    ("IMG_4547", 1.60, 6, 1.5, .62, .42, "punch"),    # ДРОП 3.87 с: спикер рассказывает, жестикулирует
-    ("IMG_4546", 11.00, 3, 1.0, .5, .5, None),        # зал внимательно смотрит
+    ("IMG_4546", 4.00, 4, 1.0, .5, .5, None),         # спикеры у экрана, начало презентации
+    ("IMG_4548", 0.00, 4, 1.0, .5, .5, None),         # зрители слушают
+    ("IMG_4547", 1.60, 6, 1.5, .62, .42, "zoom_in"),  # ДРОП 3.87 с: спикер рассказывает, жестикулирует
+    ("IMG_4546", 11.00, 2, 1.0, .5, .5, None),        # зал внимательно смотрит
     # --- часть 2: раздача подарков и значков ---
-    ("IMG_4557", 0.30, 6, 1.0, .5, .5, "flash"),      # раздаёт подарки, из зала тянутся руки
-    ("IMG_4558", 5.50, 6, 1.0, .5, .5, None),         # волонтёр идёт по залу, девушка смеётся в камеру
-    ("IMG_4557", 14.20, 4, 1.0, .5, .5, "zoom_in"),   # вручает значки
-    ("IMG_4557", 19.60, 4, 1.0, .5, .5, None),        # идёт в камеру с улыбкой
-    ("IMG_4546", 21.20, 4, 1.0, .5, .5, "zoom_out"),  # финал: «Как стать волонтёром?» + QR
+    ("IMG_4557", 0.30, 5, 1.0, .5, .5, "flash"),      # раздаёт подарки, из зала тянутся руки
+    ("IMG_4558", 6.00, 5, 1.0, .5, .5, None),         # девушка смеётся в камеру
+    ("IMG_4557", 14.20, 4, 1.0, .5, .5, None),        # вручает значки
+    ("IMG_4557", 19.60, 3, 1.0, .5, .5, None),        # идёт в камеру с улыбкой
+    ("IMG_4546", 21.20, 3, 1.0, .5, .5, "zoom_out"),  # «Как стать волонтёром?» + QR
+    # --- финал: все машут в камеру, надпись, уход в чёрный ---
+    ("IMG_4571", 0.95, 6, 1.0, .5, .5, "flash"),
 ]
-DROP_BEAT = 8
+LANDSCAPE = {"IMG_4571"}   # горизонтальное видео: целиком по центру, фон — размытая копия
+STRIP_Y = 980              # верх горизонтальной вставки
+FADE = 0.75                # уход в чёрный в конце, сек
+TONE = ("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,"
+        "zscale=t=bt709:m=bt709:r=tv,format=rgb24")
 
 
 def load(name, t0, dur, z, cx, cy):
     """кусок исходника с запасом по краям: HDR->SDR, кроп, 1080x1920, 30 к/с"""
     pre = TRF / 2 / FPS + 0.05
     ss = max(0.0, t0 - pre)
-    cw, ch = 2160 / z, 3840 / z
-    x = min(max(cx * 2160 - cw / 2, 0), 2160 - cw)
-    y = min(max(cy * 3840 - ch / 2, 0), 3840 - ch)
-    vf = (f"crop={cw:.0f}:{ch:.0f}:{x:.0f}:{y:.0f},scale={W}:{H}:flags=lanczos,"
-          "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,"
-          f"zscale=t=bt709:m=bt709:r=tv,format=rgb24,fps={FPS},eq=saturation=1.12:contrast=1.04")
+    if name in LANDSCAPE:
+        vf = ("crop=3530:2160:120:0,scale=1766:1080,split[a][b];"
+              "[a]scale=1080:660:flags=lanczos[fg];"
+              "[b]scale=-2:1920,crop=1080:1920,gblur=sigma=28[bg];"
+              f"[bg][fg]overlay=0:{STRIP_Y},{TONE},fps={FPS},eq=saturation=1.12:contrast=1.04")
+    else:
+        cw, ch = 2160 / z, 3840 / z
+        x = min(max(cx * 2160 - cw / 2, 0), 2160 - cw)
+        y = min(max(cy * 3840 - ch / 2, 0), 3840 - ch)
+        vf = (f"crop={cw:.0f}:{ch:.0f}:{x:.0f}:{y:.0f},scale={W}:{H}:flags=lanczos,"
+              f"{TONE},fps={FPS},eq=saturation=1.12:contrast=1.04")
     raw = subprocess.run([FF, "-loglevel", "error", "-ss", f"{ss:.3f}",
                           "-i", os.path.join(SRC, name + ".mov"), "-t", f"{dur + 2 * pre:.3f}",
                           "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                          capture_output=True, check=True).stdout
     fr = np.frombuffer(raw, np.uint8).reshape(-1, H, W, 3)
+    if name in LANDSCAPE:  # приглушить размытый фон, вставку оставить яркой
+        fr = fr.copy()
+        fr[:, :STRIP_Y] = (fr[:, :STRIP_Y] * 0.55).astype(np.uint8)
+        fr[:, STRIP_Y + 660:] = (fr[:, STRIP_Y + 660:] * 0.55).astype(np.uint8)
     return fr, int(round((t0 - ss) * FPS))  # кадры и индекс точки входа
 
 
-def pulse(img, s):
-    """лёгкий зум-«качок» на сильную долю"""
+def zoom(img, s):
+    """плавный наезд из центра"""
     if s <= 1.001: return img
     w, h = int(W / s), int(H / s)
     x, y = (W - w) // 2, (H - h) // 2
     return img.crop((x, y, x + w, y + h)).resize((W, H), Image.BILINEAR)
+
+
+# --- надпись «ВОЛОНТЁРСКИЙ КЛУБ»: буквы «наливаются» сверху вниз по очереди ---
+from PIL import ImageDraw, ImageFont, ImageFilter
+FONT = os.path.join(HERE, "fonts", "Montserrat-Black.ttf")
+
+
+def fit_font(text, width, size):
+    while ImageFont.truetype(FONT, size).getlength(text) > width: size -= 2
+    return ImageFont.truetype(FONT, size)
+
+
+def glyphs(text, font, cy, grad=None):
+    """список (x, y, RGBA-слой буквы с тенью) для строки по центру экрана"""
+    total = font.getlength(text); x = (W - total) / 2
+    asc, desc = font.getmetrics(); hh = asc + desc
+    out = []
+    for ch in text:
+        adv = font.getlength(ch)
+        if ch.strip():
+            pad = 30; cw, chh = int(adv) + 2 * pad, hh + 2 * pad
+            m = Image.new("L", (cw, chh), 0)
+            ImageDraw.Draw(m).text((pad, pad), ch, font=font, fill=255)
+            if grad:
+                g = np.linspace(0, 1, chh)[:, None, None]
+                col = (np.array(grad[0]) * (1 - g) + np.array(grad[1]) * g) * np.ones((1, cw, 1))
+                fill = Image.fromarray(col.astype(np.uint8))
+            else:
+                fill = Image.new("RGB", (cw, chh), "white")
+            layer = Image.new("RGBA", (cw, chh), (0, 0, 0, 0))
+            sh = m.filter(ImageFilter.GaussianBlur(10)).point(lambda v: int(v * 0.6))
+            layer.paste((0, 0, 0, 255), (0, 6), sh)
+            layer.paste(fill, (0, 0), m)
+            out.append((x - pad, cy - hh / 2 - pad, layer))
+        x += adv
+    return out
+
+
+L1, L2 = "ВОЛОНТЁРСКИЙ", "КЛУБ"
+f1 = fit_font(L1, W - 110, 140)
+f2 = fit_font(L2, W - 300, 250)
+TEXT_Y = 720
+GLYPHS = glyphs(L1, f1, TEXT_Y) + glyphs(L2, f2, TEXT_Y + 175, grad=((255, 110, 70), (255, 40, 110)))
+
+
+def title(img, t):
+    """t — сек от начала появления надписи"""
+    if t <= 0: return img
+    base = img.convert("RGBA")
+    for k, (x, y, layer) in enumerate(GLYPHS):
+        q = min(max((t - k * 0.055) / 0.5, 0), 1)
+        if q <= 0: continue
+        e = 1 - (1 - q) ** 3
+        lw, lh = layer.size
+        mask = np.zeros((lh, 1)); edge = e * lh * 1.25   # фронт «жидкости» идёт сверху вниз
+        mask[:, 0] = np.clip((edge - np.arange(lh)) / 40, 0, 1)
+        a = np.asarray(layer.getchannel("A"), float) * mask
+        l2 = layer.copy(); l2.putalpha(Image.fromarray(a.astype(np.uint8)))
+        if q < 1: l2 = l2.filter(ImageFilter.GaussianBlur(6 * (1 - e)))
+        base.alpha_composite(l2, (int(x), int(y - 28 * (1 - e))))
+    return base.convert("RGB")
 
 
 # границы кусков в кадрах, строго по сетке битов
@@ -102,6 +179,7 @@ enc = subprocess.Popen([FF, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_
                         "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", out],
                        stdin=subprocess.PIPE)
 half = TRF // 2
+LAST = len(EDIT) - 1
 for g in range(TOTAL):
     i = max(k for k in range(len(EDIT)) if starts[k] <= g)
     f = g - starts[i]
@@ -115,11 +193,14 @@ for g in range(TOTAL):
         img = TR[EDIT[nxt][6]](frame(i, f), frame(nxt, -d), p)
     else:
         img = frame(i, f)
-        if g >= DROP_BEAT * BEAT * FPS:  # после дропа — качок на каждую долю
-            ph = (g / FPS / BEAT) % 1
-            img = pulse(img, 1 + 0.02 * math.exp(-ph * 9))
-        if i == len(EDIT) - 1:        # финальный слайд — медленный наезд
-            img = pulse(img, 1 + 0.06 * f / (starts[-1] - starts[i]))
+        if i == LAST - 1:             # слайд с QR — медленный наезд
+            img = zoom(img, 1 + 0.05 * f / (starts[i + 1] - starts[i]))
+    if i == LAST:
+        img = title(img, (f - half) / FPS - 0.1)
+        left = (TOTAL - g) / FPS      # уход в чёрный
+        if left < FADE:
+            k = max(0.0, (left - 0.12) / (FADE - 0.12))
+            img = Image.fromarray((np.asarray(img, float) * k ** 1.5).astype(np.uint8))
     enc.stdin.write(img.convert("RGB").tobytes())
     if g % 30 == 0: print(f"{g / FPS:5.1f} с", flush=True)
 enc.stdin.close(); enc.wait()
@@ -127,7 +208,7 @@ enc.stdin.close(); enc.wait()
 dur = TOTAL / FPS
 subprocess.run([FF, "-y", "-loglevel", "error", "-i", out, "-i", os.path.join(HERE, "muzyka_klub.m4a"),
                 "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                "-af", f"atrim=0:{dur:.3f},afade=t=out:st={dur - 0.8:.3f}:d=0.8",
+                "-af", f"atrim=0:{dur:.3f},afade=t=out:st={dur - FADE - 0.3:.3f}:d={FADE + 0.2:.3f}",
                 "-t", f"{dur:.3f}", "-movflags", "+faststart", OUT], check=True)
 os.remove(out)
 print("готово", OUT)
