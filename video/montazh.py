@@ -2,7 +2,7 @@
 
 Склейки стоят в сетке 124 BPM, дроп музыки — 3.87 с (начало 3-го такта).
 Переходы — из video/perehody.py (zoom in, zoom out, flash), без тряски.
-Финал — все машут в камеру, надпись «Волонтёрский клуб» и уход в чёрный.
+Финал — все машут в камеру (на весь экран), надпись «Волонтёрский клуб» и уход в чёрный.
 
 Запуск: python montazh.py <папка с IMG_*.mov> <выход.mp4>
 """
@@ -41,11 +41,12 @@ EDIT = [
     ("IMG_4557", 14.20, 4, 1.0, .5, .5, None),        # вручает значки
     ("IMG_4557", 19.60, 3, 1.0, .5, .5, None),        # идёт в камеру с улыбкой
     ("IMG_4546", 21.20, 3, 1.0, .5, .5, "zoom_out"),  # «Как стать волонтёром?» + QR
-    # --- финал: все машут в камеру, надпись, уход в чёрный ---
+    # --- финал: все машут в камеру (на весь экран), надпись, уход в чёрный ---
     ("IMG_4571", 0.95, 6, 1.0, .5, .5, "flash"),
 ]
-LANDSCAPE = {"IMG_4571"}   # горизонтальное видео: целиком по центру, фон — размытая копия
-STRIP_Y = 980              # верх горизонтальной вставки
+LANDSCAPE = {"IMG_4571"}   # горизонтальное видео: на весь экран, плавная панорама по группе
+LW = 3414                  # ширина горизонтального кадра при высоте 1920
+PAN = (650, 1750)          # панорама слева направо (x левого края кропа)
 FADE = 0.75                # уход в чёрный в конце, сек
 TONE = ("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,"
         "zscale=t=bt709:m=bt709:r=tv,format=rgb24")
@@ -56,10 +57,7 @@ def load(name, t0, dur, z, cx, cy):
     pre = TRF / 2 / FPS + 0.05
     ss = max(0.0, t0 - pre)
     if name in LANDSCAPE:
-        vf = ("crop=3530:2160:120:0,scale=1766:1080,split[a][b];"
-              "[a]scale=1080:660:flags=lanczos[fg];"
-              "[b]scale=-2:1920,crop=1080:1920,gblur=sigma=28[bg];"
-              f"[bg][fg]overlay=0:{STRIP_Y},{TONE},fps={FPS},eq=saturation=1.12:contrast=1.04")
+        vf = f"scale={LW}:{H}:flags=lanczos,{TONE},fps={FPS},eq=saturation=1.12:contrast=1.04"
     else:
         cw, ch = 2160 / z, 3840 / z
         x = min(max(cx * 2160 - cw / 2, 0), 2160 - cw)
@@ -70,11 +68,7 @@ def load(name, t0, dur, z, cx, cy):
                           "-i", os.path.join(SRC, name + ".mov"), "-t", f"{dur + 2 * pre:.3f}",
                           "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                          capture_output=True, check=True).stdout
-    fr = np.frombuffer(raw, np.uint8).reshape(-1, H, W, 3)
-    if name in LANDSCAPE:  # приглушить размытый фон, вставку оставить яркой
-        fr = fr.copy()
-        fr[:, :STRIP_Y] = (fr[:, :STRIP_Y] * 0.55).astype(np.uint8)
-        fr[:, STRIP_Y + 660:] = (fr[:, STRIP_Y + 660:] * 0.55).astype(np.uint8)
+    fr = np.frombuffer(raw, np.uint8).reshape(-1, H, LW if name in LANDSCAPE else W, 3)
     return fr, int(round((t0 - ss) * FPS))  # кадры и индекс точки входа
 
 
@@ -96,7 +90,7 @@ def fit_font(text, width, size):
     return ImageFont.truetype(FONT, size)
 
 
-def glyphs(text, font, cy, grad=None):
+def glyphs(text, font, cy, grad=None, color=(255, 255, 255), shadow=0.6):
     """список (x, y, RGBA-слой буквы с тенью) для строки по центру экрана"""
     total = font.getlength(text); x = (W - total) / 2
     asc, desc = font.getmetrics(); hh = asc + desc
@@ -112,9 +106,9 @@ def glyphs(text, font, cy, grad=None):
                 col = (np.array(grad[0]) * (1 - g) + np.array(grad[1]) * g) * np.ones((1, cw, 1))
                 fill = Image.fromarray(col.astype(np.uint8))
             else:
-                fill = Image.new("RGB", (cw, chh), "white")
+                fill = Image.new("RGB", (cw, chh), color)
             layer = Image.new("RGBA", (cw, chh), (0, 0, 0, 0))
-            sh = m.filter(ImageFilter.GaussianBlur(10)).point(lambda v: int(v * 0.6))
+            sh = m.filter(ImageFilter.GaussianBlur(10)).point(lambda v: int(v * shadow))
             layer.paste((0, 0, 0, 255), (0, 6), sh)
             layer.paste(fill, (0, 0), m)
             out.append((x - pad, cy - hh / 2 - pad, layer))
@@ -125,8 +119,9 @@ def glyphs(text, font, cy, grad=None):
 L1, L2 = "ВОЛОНТЁРСКИЙ", "КЛУБ"
 f1 = fit_font(L1, W - 110, 140)
 f2 = fit_font(L2, W - 300, 250)
-TEXT_Y = 720
-GLYPHS = glyphs(L1, f1, TEXT_Y) + glyphs(L2, f2, TEXT_Y + 175, grad=((255, 110, 70), (255, 40, 110)))
+TEXT_Y = 470               # на белом экране проектора, над головами
+GLYPHS = (glyphs(L1, f1, TEXT_Y, color=(28, 28, 48), shadow=0.25) +
+          glyphs(L2, f2, TEXT_Y + 175, grad=((255, 90, 60), (235, 30, 100)), shadow=0.3))
 
 
 def title(img, t):
@@ -170,7 +165,12 @@ def clip(i):
 def frame(i, f):
     """кадр куска i, f — кадры от его начала (может быть <0 или за концом)"""
     fr, in0 = clip(i)
-    return Image.fromarray(fr[min(max(in0 + f, 0), len(fr) - 1)])
+    a = fr[min(max(in0 + f, 0), len(fr) - 1)]
+    if a.shape[1] != W:  # горизонтальный кадр: плавная панорама на весь экран
+        q = min(max(f / (starts[i + 1] - starts[i]), 0), 1)
+        x = int(PAN[0] + (PAN[1] - PAN[0]) * (3 * q * q - 2 * q ** 3))
+        a = a[:, x:x + W]
+    return Image.fromarray(a)
 
 
 out = OUT + ".noaudio.mp4"
